@@ -24,7 +24,7 @@ public:
     glm::mat4 process_vista();
 };
 User::User() {
-    glm::vec3 centro(250.0f, 235.0f, 68.0f); 
+    glm::vec3 centro(0.0f, 0.0f, 0.0f);
     cameraPos = centro + glm::vec3(0.0f, 0.0f, 600.0f);
     cameraFront = glm::normalize(centro - cameraPos);
     cameraUp = glm::vec3(0.0f, 1.0f, 0.0f);
@@ -80,7 +80,7 @@ void User::processInput(GLFWwindow *window, float deltaTime) {
         vistas(4);
 }
 void User::vistas(int vista) {
-    glm::vec3 centro(250.0f, 235.0f, 68.0f); 
+    glm::vec3 centro(0.0f, 0.0f, 0.0f);
     switch (vista) {
         case 1: //Vista superior
             cameraPos = centro + glm::vec3(0, 600, 0);
