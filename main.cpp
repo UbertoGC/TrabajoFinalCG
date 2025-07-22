@@ -5,15 +5,17 @@
 #include <string>
 #include <set>
 #include <eigen3/Eigen/Dense>
+#include <opencv2/opencv.hpp>
 #include "LibPuntoGL/Triangulo.h"
 #include "LibPuntoGL/PuntoGL.h"
 #include "LibPuntoGL/KDTreeGL.h"
 #include "Controles.h"
 using namespace std;
-User a;
-void mouse_callback(GLFWwindow* window, double xpos, double ypos) {
-    a.mouse_callback(window,xpos,ypos);
-}
+using namespace cv;
+int windowWidth = 640;
+int windowHeight = 480;
+GLuint cameraTexture;
+User usuario;
 void leerArchivoASC(const string& rutaArchivo, vector<PuntoGL>& datos) {
     cout<<"Leyendo...\n";
     ifstream archivo(rutaArchivo);
@@ -188,6 +190,29 @@ void ReducirPuntos(vector<PuntoGL>& puntos, vector<PuntoGL*>& puntos_filtrados){
         puntos_filtrados.push_back(p);
     }
 }
+void drawBackgroundQuad() {
+    glDisable(GL_DEPTH_TEST);
+
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    glOrtho(0, windowWidth, windowHeight, 0, -1, 1);
+
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, cameraTexture);
+
+    glBegin(GL_QUADS);
+        glTexCoord2f(0, 0); glVertex2f(0, 0);
+        glTexCoord2f(1, 0); glVertex2f(windowWidth, 0);
+        glTexCoord2f(1, 1); glVertex2f(windowWidth, windowHeight);
+        glTexCoord2f(0, 1); glVertex2f(0, windowHeight);
+    glEnd();
+
+    glDisable(GL_TEXTURE_2D);
+    glEnable(GL_DEPTH_TEST);
+}
 int main(){
     string ruta = "Prueba2/Escanear_Project1_scan_";
     vector<PuntoGL> puntos;
@@ -202,54 +227,105 @@ int main(){
     cout<<"Puntos filtrados: "<<puntos_filtrados.size()<<endl;
     BPA(puntos_filtrados, malla);
     cout<<"Triangulos creados: "<<malla.size()<<endl;
-    glfwInit();
-    GLFWwindow* window = glfwCreateWindow(800, 600, "Visualizador 3D", nullptr, nullptr);
+
+    Mat cameraMatrix, distCoeffs;
+    FileStorage fs("calibration.yml", FileStorage::READ);
+    fs["camera_matrix"] >> cameraMatrix;
+    fs["distortion_coefficients"] >> distCoeffs;
+    fs.release();
+
+    VideoCapture cam(0);
+    cam.set(CAP_PROP_FRAME_WIDTH, windowWidth);
+    cam.set(CAP_PROP_FRAME_HEIGHT, windowHeight);
+    if (!cam.isOpened()) {
+        std::cerr << "No se pudo abrir la cámara.\n";
+        return -1;
+    }
+    Mat frameBGR;
+    cam >> frameBGR;
+    if (frameBGR.empty()) {
+        cerr << "La cámara no devuelve imagen\n";
+        return -1;
+    }
+
+    windowWidth = frameBGR.cols;
+    windowHeight = frameBGR.rows;
+
+    if (!glfwInit()){
+        return -1;
+    }
+    GLFWwindow* window = glfwCreateWindow(windowWidth, windowHeight, "OpenGL + OpenCV", nullptr, nullptr);
     if (!window) {
         cerr << "No se pudo crear la ventana\n";
         glfwTerminate();
         return -1;
     }
+
     glfwMakeContextCurrent(window);
     glewExperimental = GL_TRUE;
     glewInit();
+
+    glViewport(0, 0, windowWidth, windowHeight);
     glEnable(GL_DEPTH_TEST);
-    glPointSize(3.0f);
-    glLineWidth(2.0f);
-    glfwSetCursorPosCallback(window, mouse_callback);
+    glEnable(GL_TEXTURE_2D);
+    glGenTextures(1, &cameraTexture);
+    glBindTexture(GL_TEXTURE_2D, cameraTexture);
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    // Usar formato GL_BGR directamente
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB,
+                 frameBGR.cols, frameBGR.rows,
+                 0, GL_BGR, GL_UNSIGNED_BYTE, frameBGR.data);
     double lastTime = glfwGetTime();
     while (!glfwWindowShouldClose(window)) {
         double currentTime = glfwGetTime();
         float deltaTime = currentTime - lastTime;
         lastTime = currentTime;
 
-        a.processInput(window, deltaTime);
-        glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-        float aspect = 800.0f / 600.0f;
-        glm::mat4 projection = glm::perspective(glm::radians(45.0f), aspect, 0.1f, 2000.0f);
+        cam >> frameBGR;
+        if (frameBGR.empty()) continue;
 
-        glm::mat4 view = a.process_vista();
-        
+        Mat frameUndistorted;
+        undistort(frameBGR, frameUndistorted, cameraMatrix, distCoeffs);
+
+        // Actualizar textura cada frame
+        glBindTexture(GL_TEXTURE_2D, cameraTexture);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0,
+                        frameUndistorted.cols, frameUndistorted.rows,
+                        GL_BGR, GL_UNSIGNED_BYTE, frameUndistorted.data);
+
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        drawBackgroundQuad();
+        float aspecto = (float)windowWidth / (float)windowHeight;
+        glm::mat4 projection = glm::perspective(glm::radians(45.0f), aspecto, 0.1f, 2000.0f);
+        glm::mat4 view = usuario.process_vista();
         glMatrixMode(GL_PROJECTION);
         glLoadMatrixf(&projection[0][0]);
 
         glMatrixMode(GL_MODELVIEW);
         glLoadMatrixf(&view[0][0]);
-        
         for (int i = 0; i < malla.size(); i++){
             malla[i].Dibujar();
         }
+        /*
         glPointSize(5.0f);
         glBegin(GL_POINTS);
         for (int i = 0; i < puntos_filtrados.size(); i++){
-             glColor3f(1.0, 0.0, 0.0); 
+            glColor3f(1.0, 0.0, 0.0); 
             glVertex3f(puntos_filtrados[i]->X(), puntos_filtrados[i]->Y(), puntos_filtrados[i]->Z());
         }
         glEnd();
+        */
+        glColor3f(1.0f, 1.0f, 1.0f);
         glfwSwapBuffers(window);
         glfwPollEvents();
     }
 
+    glDeleteTextures(1, &cameraTexture);
     glfwTerminate();
     return 0;
 }

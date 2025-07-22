@@ -75,13 +75,14 @@ Triangulo& Triangulo::operator=(const Triangulo& B){
 
 }
 void Triangulo::Dibujar(float r_tri, float g_tri, float b_tri, float r_lin, float g_lin, float b_lin){
+    glLineWidth(1.0f);
     glColor3f(r_tri, g_tri, b_tri);
     glBegin(GL_TRIANGLES);
     for (int i = 0; i < 3; i++) {
         glVertex3f(puntos[i].X(), puntos[i].Y(), puntos[i].Z());
     }
     glEnd();
-    glLineWidth(1.0f);
+    
     glColor3f(r_lin, g_lin, b_lin);
     glBegin(GL_LINES);
     for (int i = 0; i < n_puntos; i++) {
